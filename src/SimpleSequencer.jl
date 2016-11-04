@@ -107,10 +107,12 @@ type T1 <: Stimulus
     IF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
+    axisname::Symbol
+    axislabel::String
 end
-T1(awg, Xpi, readout; IF=DEF_IF,
+T1(awg, Xpi, readout; IF=DEF_IF, axisname = :t1delay, axislabel = "Delay",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    T1(awg, Xpi, readout, IF, finaldelay1, finaldelay2)
+    T1(awg, Xpi, readout, IF, finaldelay1, finaldelay2, axisname, axislabel)
 function source(x::T1, t)
     awg = x.awg
     rate = awg[SampleRate]
@@ -139,10 +141,12 @@ type Rabi <: Stimulus
     IF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
+    axisname::Symbol
+    axislabel::String
 end
-Rabi(awg, X, readout; IF=DEF_IF,
+Rabi(awg, X, readout; IF=DEF_IF, axisname=:xyduration, axislabel="XY pulse duration",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    Rabi(awg, X, readout, IF, finaldelay1, finaldelay2)
+    Rabi(awg, X, readout, IF, finaldelay1, finaldelay2, axisname, axislabel)
 function source(x::Rabi, t)
     awg = x.awg
     rate = awg[SampleRate]
@@ -170,10 +174,13 @@ type Ramsey <: Stimulus
     IF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
+    axisname::Symbol
+    axislabel::String
 end
-Ramsey(awg, Xpi2, readout; IF=DEF_IF,
+Ramsey(awg, Xpi2, readout; IF=DEF_IF, axisname=:ramseydelay,
+    axislabel="Free precession time",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    Ramsey(awg, Xpi2, readout, IF, finaldelay1, finaldelay2)
+    Ramsey(awg, Xpi2, readout, IF, finaldelay1, finaldelay2, axisname, axislabel)
 function source(x::Ramsey, t)
     awg = x.awg
     rate = awg[SampleRate]
@@ -207,12 +214,21 @@ type CPMG <: Stimulus
     IF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
+    nY::Int
+    t_precess::Float64
+    axisname::Symbol
+    axislabel::String
 end
-CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF,
+CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=1e-6,
+    axisname=:n_and_tp,
+    axislabel=:"(# of Y pulses, total free precession time)",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    CPMG(awg, Xpi2, Ypi, mYpi, readout, IF, finaldelay1, finaldelay2)
+    CPMG(awg, Xpi2, Ypi, mYpi, readout, IF, finaldelay1, finaldelay2,
+        nY, t_precess, axisname, axislabel)
 function source(x::CPMG, v)
     nY, t_precess = v
+    x.nY = nY
+    x.t_precess = t_precess
     awg = x.awg
     rate = awg[SampleRate]
     t = t_precess / (2*nY)
@@ -248,15 +264,21 @@ end
 
 # For convenience
 type CPMG_n <: Stimulus
-    s::CPMG
-    t::Float64
+    cpmg::CPMG
+    axisname::Symbol
+    axislabel::String
 end
-source(s::CPMG_n, nY) = source(s.s, (nY, s.t))
+CPMG_n(s::CPMG; axisname=:n_Ypulses, axislabel="# of Y pulses") =
+    CPMG_n(s, axisname, axislabel)
+source(s::CPMG_n, nY) = source(s.cpmg, (nY, s.cpmg.t_precess))
 
 type CPMG_t <: Stimulus
-    s::CPMG
-    nY::Int
+    cpmg::CPMG
+    axisname::Symbol
+    axislabel::String
 end
-source(s::CPMG_t, t) = source(s.s, (s.nY, t))
+CPMG_t(s::CPMG; axisname=:precessiontime, axislabel="Total free precession time") =
+    CPMG_t(s, axisname, axislabel)
+source(s::CPMG_t, t) = source(s.cpmg, (s.cpmg.nY, t))
 
 end # module
