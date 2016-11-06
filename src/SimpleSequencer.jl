@@ -40,7 +40,8 @@ function sequence(sample_rate, IF, v::Vector{Pulse}; marker_pts = 100)
     step = 1/sample_rate
 
     total_time = mapreduce(duration, +, 0, v)
-    npts = length(0:step:total_time)
+    rng = 0.0:step:total_time
+    npts = length(rng)
     seq = SharedArray(Complex{Float64}, npts)
     markers = SharedArray(Bool, npts)
 
@@ -49,20 +50,19 @@ function sequence(sample_rate, IF, v::Vector{Pulse}; marker_pts = 100)
         markers[i] = false
     end
 
-    dur, idx = 0, 0
+    dur, idx = 0.0, 0
     for p in v
-        sta = rem(dur, step) == 0 ? dur : (dur + step - rem(dur,step))
-        rng = sta:step:(dur+duration(p))
+        prng = rng[find(x->dur <= x < dur+duration(p), rng)]
         if !isa(p, Delay)
-            @sync begin @parallel for i in 1:length(rng)
-                    seq[idx+i] = p(rng[i]-dur)*if_signal(rng[i], IF, phase(p))
+            @sync begin @parallel for i in 1:length(prng)
+                    seq[idx+i] = p(prng[i]-dur)*if_signal(prng[i], IF, phase(p))
                 end
                 @parallel for i in 1:marker_pts
                     markers[idx+i] = true
                 end
             end
         end
-        idx += length(rng) - 1
+        idx += length(prng)
         dur += duration(p)
     end
 
