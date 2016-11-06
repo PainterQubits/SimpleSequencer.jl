@@ -4,29 +4,30 @@ import InstrumentControl: source
 using InstrumentControl
 using InstrumentControl.AWG5014C
 
-const DEF_READ_DLY = 125e-6
+const DEF_READ_DLY = 125000
 const DEF_IF = 100e6
 
 @inline env_cos(t, a, d) = a*(1 + cos(2π*(t - d/2)/d))/2
-@inline if_signal(t, frequency, phase) = exp(-im*(2π*frequency*t + phase))
+@inline if_signal(t, frequency, phase) = exp(im*(2π*frequency*t + phase))
 
 abstract Pulse
 
 immutable Delay <: Pulse
-    duration::Float64
+    duration::Int
 end
+
 (x::Delay)(t) = 0.0
 
 type CosinePulse <: Pulse
     amplitude::Float64
-    duration::Float64
+    duration::Int
     phase::Float64
 end
 (x::CosinePulse)(t) = env_cos(t, x.amplitude, x.duration)
 
 type RectanglePulse <: Pulse
     amplitude::Float64
-    duration::Float64
+    duration::Int
     phase::Float64
 end
 (x::RectanglePulse)(t) = x.amplitude
@@ -35,8 +36,10 @@ end
 phase(x::Pulse) = :phase in fieldnames(x) ? x.phase : 0.0
 
 function sequence(sample_rate, IF, v::Vector{Pulse}; marker_pts = 100)
-    total_time = mapreduce(duration, +, 0.0, v)
-    npts = Int(ceil(sample_rate * total_time)) + 1
+    step = Int(1e9/sample_rate)
+    @assert step==1
+    total_time = mapreduce(duration, +, 0, v)
+    npts = length(0:step:total_time)
     seq = SharedArray(Complex{Float64}, npts)
     markers = SharedArray(Bool, npts)
 
@@ -45,19 +48,19 @@ function sequence(sample_rate, IF, v::Vector{Pulse}; marker_pts = 100)
         markers[i] = false
     end
 
-    idx, dur = 0, 0.0
+    dur, idx = 0, 0
     for p in v
-        rng = dur:(1/sample_rate):(dur+duration(p))
+        rng = dur:step:(dur+duration(p))
         if !isa(p, Delay)
             @sync begin @parallel for i in 1:length(rng)
-                    seq[idx+i] = p(rng[i]-dur)*if_signal(rng[i], IF, phase(p))
+                    seq[idx+i] = p(rng[i]-dur)*if_signal(rng[i]*1e-9, IF, phase(p))
                 end
                 @parallel for i in 1:marker_pts
                     markers[idx+i] = true
                 end
             end
         end
-        idx += length(rng)
+        idx += length(rng) - 1
         dur += duration(p)
     end
 
@@ -105,8 +108,8 @@ type T1 <: Stimulus
     Xpi::Pulse
     readout::Pulse
     IF::Float64
-    finaldelay1::Float64
-    finaldelay2::Float64
+    finaldelay1::Int
+    finaldelay2::Int
     axisname::Symbol
     axislabel::String
 end
@@ -139,8 +142,8 @@ type Rabi <: Stimulus
     X::Pulse
     readout::Pulse
     IF::Float64
-    finaldelay1::Float64
-    finaldelay2::Float64
+    finaldelay1::Int
+    finaldelay2::Int
     axisname::Symbol
     axislabel::String
 end
@@ -172,8 +175,8 @@ type Ramsey <: Stimulus
     Xpi2::Pulse
     readout::Pulse
     IF::Float64
-    finaldelay1::Float64
-    finaldelay2::Float64
+    finaldelay1::Int
+    finaldelay2::Int
     axisname::Symbol
     axislabel::String
 end
@@ -212,14 +215,14 @@ type CPMG <: Stimulus
     mYpi::Pulse
     readout::Pulse
     IF::Float64
-    finaldelay1::Float64
-    finaldelay2::Float64
+    finaldelay1::Int
+    finaldelay2::Int
     nY::Int
-    t_precess::Float64
+    t_precess::Int
     axisname::Symbol
     axislabel::String
 end
-CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=1e-6,
+CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=1000,
     axisname=:n_and_tp,
     axislabel=:"(# of Y pulses, total free precession time)",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
@@ -280,5 +283,21 @@ end
 CPMG_t(s::CPMG; axisname=:precessiontime, axislabel="Total free precession time") =
     CPMG_t(s, axisname, axislabel)
 source(s::CPMG_t, t) = source(s.cpmg, (s.cpmg.nY, t))
+
+type PulseVariation <: Stimulus
+    p::Pulse
+    f::Symbol
+    rabi::Rabi
+    axisname::Symbol
+    axislabel::String
+end
+PulseVariation(p, f, rabi; axisname=f, axislabel=string(f)) =
+    PulseVariation(p, f, rabi, axisname, axislabel)
+
+function source(s::PulseVariation, v)
+    setfield!(p, f, v)
+    source(s.rabi, 0.0)
+end
+
 
 end # module
