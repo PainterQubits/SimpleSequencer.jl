@@ -3,8 +3,9 @@ module SimpleSequencer
 import InstrumentControl: source
 using InstrumentControl
 using InstrumentControl.AWG5014C
+# using Unitful: ns,μs,ms,s, GHz,MHz,kHz,Hz
 
-const DEF_READ_DLY = 125000
+const DEF_READ_DLY = 125e-9
 const DEF_IF = 100e6
 
 @inline env_cos(t, a, d) = a*(1 + cos(2π*(t - d/2)/d))/2
@@ -13,21 +14,21 @@ const DEF_IF = 100e6
 abstract Pulse
 
 immutable Delay <: Pulse
-    duration::Int
+    duration::Float64
 end
 
 (x::Delay)(t) = 0.0
 
 type CosinePulse <: Pulse
     amplitude::Float64
-    duration::Int
+    duration::Float64
     phase::Float64
 end
 (x::CosinePulse)(t) = env_cos(t, x.amplitude, x.duration)
 
 type RectanglePulse <: Pulse
     amplitude::Float64
-    duration::Int
+    duration::Float64
     phase::Float64
 end
 (x::RectanglePulse)(t) = x.amplitude
@@ -36,8 +37,8 @@ end
 phase(x::Pulse) = :phase in fieldnames(x) ? x.phase : 0.0
 
 function sequence(sample_rate, IF, v::Vector{Pulse}; marker_pts = 100)
-    step = Int(1e9/sample_rate)
-    @assert step==1
+    step = 1/sample_rate
+
     total_time = mapreduce(duration, +, 0, v)
     npts = length(0:step:total_time)
     seq = SharedArray(Complex{Float64}, npts)
@@ -50,10 +51,11 @@ function sequence(sample_rate, IF, v::Vector{Pulse}; marker_pts = 100)
 
     dur, idx = 0, 0
     for p in v
-        rng = dur:step:(dur+duration(p))
+        sta = rem(dur, step) == 0 ? dur : (dur + step - rem(dur,step))
+        rng = sta:step:(dur+duration(p))
         if !isa(p, Delay)
             @sync begin @parallel for i in 1:length(rng)
-                    seq[idx+i] = p(rng[i]-dur)*if_signal(rng[i]*1e-9, IF, phase(p))
+                    seq[idx+i] = p(rng[i]-dur)*if_signal(rng[i], IF, phase(p))
                 end
                 @parallel for i in 1:marker_pts
                     markers[idx+i] = true
@@ -108,8 +110,8 @@ type T1 <: Stimulus
     Xpi::Pulse
     readout::Pulse
     IF::Float64
-    finaldelay1::Int
-    finaldelay2::Int
+    finaldelay1::Float64
+    finaldelay2::Float64
     axisname::Symbol
     axislabel::String
 end
@@ -142,8 +144,8 @@ type Rabi <: Stimulus
     X::Pulse
     readout::Pulse
     IF::Float64
-    finaldelay1::Int
-    finaldelay2::Int
+    finaldelay1::Float64
+    finaldelay2::Float64
     axisname::Symbol
     axislabel::String
 end
@@ -175,8 +177,8 @@ type Ramsey <: Stimulus
     Xpi2::Pulse
     readout::Pulse
     IF::Float64
-    finaldelay1::Int
-    finaldelay2::Int
+    finaldelay1::Float64
+    finaldelay2::Float64
     axisname::Symbol
     axislabel::String
 end
@@ -215,10 +217,10 @@ type CPMG <: Stimulus
     mYpi::Pulse
     readout::Pulse
     IF::Float64
-    finaldelay1::Int
-    finaldelay2::Int
+    finaldelay1::Float64
+    finaldelay2::Float64
     nY::Int
-    t_precess::Int
+    t_precess::Float64
     axisname::Symbol
     axislabel::String
 end
