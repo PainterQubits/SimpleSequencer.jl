@@ -1,3 +1,7 @@
+# TODO: why does `SimpleSequencer.prepare` hang when first executed?
+# TODO: how to pass marker_pts through when sourcing stimuli?
+# TODO: PulseVariation stimulus not fully functional.
+
 module SimpleSequencer
 
 import InstrumentControl: source
@@ -5,14 +9,31 @@ using InstrumentControl
 using InstrumentControl.AWG5014C
 # using Unitful: ns,μs,ms,s, GHz,MHz,kHz,Hz
 
-const DEF_READ_DLY = 125e-9
+const DEF_READ_DLY = 125e-6
 const DEF_IF = 100e6
 
 @inline env_cos(t, a, d) = a*(1 + cos(2π*(t - d/2)/d))/2
 @inline if_signal(t, frequency, phase) = exp(im*(2π*frequency*t + phase))
 
+"""
+```
+abstract Pulse
+```
+
+A pulse that can be sequenced by [`SimpleSequencer.sequence`](@ref). Concrete
+subtypes of `Pulse` represent different envelopes. 
+"""
 abstract Pulse
 
+"""
+```
+immutable Delay <: Pulse
+    duration::Float64
+end
+```
+
+Generate a delay for a pulse sequence.
+"""
 immutable Delay <: Pulse
     duration::Float64
 end
@@ -36,15 +57,19 @@ end
 @inline duration(x::Pulse) = x.duration
 phase(x::Pulse) = :phase in fieldnames(x) ? x.phase : 0.0
 
-function sequence(sample_rate, IF, v::Vector{Pulse}; marker_pts = 100)
+function sequence(sample_rate, IF, v::Vector{Pulse}; readout=false, marker_pts = 100)
     step = 1/sample_rate
 
+    # `rng` is the sole time-base used for sequence generation.
     total_time = mapreduce(duration, +, 0, v)
     rng = 0.0:step:total_time
     npts = length(rng)
+
+    # Preallocate arrays, leaving the option of using multiple worker procs
     seq = SharedArray(Complex{Float64}, npts)
     markers = SharedArray(Bool, npts)
 
+    # zero out the arrays
     @sync @parallel for i=1:npts
         seq[i] = 0.0+0.0im
         markers[i] = false
@@ -52,10 +77,19 @@ function sequence(sample_rate, IF, v::Vector{Pulse}; marker_pts = 100)
 
     dur, idx = 0.0, 0
     for p in v
+        # Find points in our time-base that are within the duration of pulse `p`
         prng = rng[find(x->dur <= x < dur+duration(p), rng)]
+
+        # For the readout tone, we don't care if it is phase-locked to the
+        # XY time base. In fact, we probably want readout tones to always have
+        # the same absolute phase, and more importantly, for successive readout
+        # tones to start at the same exact phase.
+        prng2 = length(prng)==0 ? prng : prng - prng[1] #don't getindex if len. 0
+        ifrng = readout ? prng2 : prng
+
         if !isa(p, Delay)
             @sync begin @parallel for i in 1:length(prng)
-                    seq[idx+i] = p(prng[i]-dur)*if_signal(prng[i], IF, phase(p))
+                    seq[idx+i] = p(prng[i]-dur)*if_signal(ifrng[i], IF, phase(p))
                 end
                 @parallel for i in 1:marker_pts
                     markers[idx+i] = true
@@ -135,7 +169,8 @@ function source(x::T1, t)
          x.readout,
          Delay(x.finaldelay1),
          x.readout,
-         Delay(x.finaldelay2)])
+         Delay(x.finaldelay2)],
+         readout = true)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
@@ -168,7 +203,8 @@ function source(x::Rabi, t)
          x.readout,
          Delay(x.finaldelay1),
          x.readout,
-         Delay(x.finaldelay2)])
+         Delay(x.finaldelay2)],
+         readout = true)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
@@ -206,7 +242,8 @@ function source(x::Ramsey, t)
          x.readout,
          Delay(x.finaldelay1),
          x.readout,
-         Delay(x.finaldelay2)])
+         Delay(x.finaldelay2)],
+         readout = true)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
@@ -263,7 +300,8 @@ function source(x::CPMG, v)
          x.readout,
          Delay(x.finaldelay1),
          x.readout,
-         Delay(x.finaldelay2)])
+         Delay(x.finaldelay2)],
+         readout = true)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
