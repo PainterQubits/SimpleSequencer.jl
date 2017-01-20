@@ -5,9 +5,9 @@ makedocs(
     modules = [SimpleSequencer]
 )
 
-# Documenter can also automatically deploy documentation to gh-pages.
-# See "Hosting Documentation" and deploydocs() in the Documenter manual
-# for more information.
-#=deploydocs(
-    repo = "<repository url>"
-)=#
+deploydocs(
+    deps = Deps.pip("mkdocs", "mkdocs-material", "python-markdown-math"),
+    julia = "nightly",
+    osname = "linux",
+    repo = "github.com/PainterQubits/SimpleSequencer.jl.git"
+)

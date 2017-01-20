@@ -3,9 +3,10 @@
 # TODO: PulseVariation stimulus not fully functional.
 # TODO: separate readout and XY IF.
 
+__precompile__(true)
 module SimpleSequencer
 
-import InstrumentControl: source
+import ICCommon: source, Stimulus
 using InstrumentControl
 using InstrumentControl.AWG5014C
 
@@ -116,11 +117,11 @@ function sequence(sample_rate, IF, total_time, v::Vector{Pulse}; readout=false, 
     npts = length(rng)
 
     # Preallocate arrays, leaving the option of using multiple worker procs
-    seq = SharedArray(Complex{Float64}, npts)
-    markers = SharedArray(Bool, npts)
+    seq = Vector{Complex{Float64}}(npts)
+    markers = Vector{Bool}(npts)
 
     # zero out the arrays
-    @sync @parallel for i=1:npts
+    for i=1:npts
         seq[i] = 0.0+0.0im
         markers[i] = false
     end
@@ -138,12 +139,11 @@ function sequence(sample_rate, IF, total_time, v::Vector{Pulse}; readout=false, 
         ifrng = readout ? prng2 : prng
 
         if !isa(p, Delay)
-            @sync begin @parallel for i in 1:length(prng)
-                    seq[idx+i] = p(prng[i]-dur)*if_signal(ifrng[i], IF, phase(p))
-                end
-                @parallel for i in 1:marker_pts
-                    markers[idx+i] = true
-                end
+            for i in 1:length(prng)
+                seq[idx+i] = p(prng[i]-dur)*if_signal(ifrng[i], IF, phase(p))
+            end
+            for i in 1:marker_pts
+                markers[idx+i] = true
             end
         end
         idx += length(prng)
@@ -170,6 +170,7 @@ function prepare(awg::InsAWG5014C)
     pushto_awg(awg, "simple_seq_XYQ", data, :RealWaveform)
     pushto_awg(awg, "simple_seq_RI", data, :RealWaveform)
     pushto_awg(awg, "simple_seq_RQ", data, :RealWaveform)
+    opc(awg)
 
     awg[RunMode] = :Sequence
     awg[SequenceLength] = 0
@@ -182,9 +183,12 @@ function prepare(awg::InsAWG5014C)
     awg[SequenceGOTOTarget,1] = 1
     awg[SequenceGOTOState,1] = true
     awg[SequenceWaitTrigger,1] = true
+    opc(awg)
 
     @allch awg[ChannelOutput] = true
     awg[Output] = true
+    opc(awg)
+
     nothing
 end
 
@@ -203,9 +207,12 @@ function sendpulses(awg::InsAWG5014C, xys, xym, rs, rm)
     pushto_awg(awg, "simple_seq_XYQ", AWG5014CData(imag(xys), xym, xym), :RealWaveform)
     pushto_awg(awg, "simple_seq_RI", AWG5014CData(real(rs), rm, rm), :RealWaveform)
     pushto_awg(awg, "simple_seq_RQ", AWG5014CData(imag(rs), rm, rm), :RealWaveform)
+    opc(awg)
+
     @allch awg[ChannelOutput] = true
     awg[Output] = true
-    opc(awg) # wait until pending commands finish
+    opc(awg)
+
     nothing
 end
 
@@ -518,9 +525,21 @@ function source(x::StarkShift, t)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
+type LongStarkShift <: Stimulus
+    awg::InsAWG5014C
+    Xpi::Pulse
+    readout1::Pulse
+    readout2::Pulse
+    IF::Float64
+    finaldelay1::Float64
+    finaldelay2::Float64
+    axisname::Symbol
+    axislabel::String
+end
+
 """
 ```
-StarkShift(awg, Xpi, readout1, readout2; IF=DEF_IF, axisname=:t_offset,
+LongStarkShift(awg, Xpi, readout1, readout2; IF=DEF_IF, axisname=:t_offset,
     axislabel=:"Offset time", finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 ```
 
@@ -537,17 +556,6 @@ if you drive the resonator a long time.
 Do take care that the resonator has rung down before doing the second readout pulse
 (the readout pulses are not kept phase coherent).
 """
-type LongStarkShift <: Stimulus
-    awg::InsAWG5014C
-    Xpi::Pulse
-    readout1::Pulse
-    readout2::Pulse
-    IF::Float64
-    finaldelay1::Float64
-    finaldelay2::Float64
-    axisname::Symbol
-    axislabel::String
-end
 LongStarkShift(awg, Xpi, readout1, readout2; IF=DEF_IF,
     axisname=:t_offset,
     axislabel=:"Offset time",
