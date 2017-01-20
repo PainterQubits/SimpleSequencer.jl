@@ -1,4 +1,4 @@
-using SimpleSequencer
+# using SimpleSequencer
 using Base.Test
 
 # write your own tests here
