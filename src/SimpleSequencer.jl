@@ -17,45 +17,36 @@ const DEF_IF = 100e6
 @inline if_signal(t, frequency, phase) = exp(im*(2π*frequency*t + phase))
 
 """
-```
-abstract Pulse
-```
-
+    abstract type Pulse end
 A pulse that can be sequenced by [`SimpleSequencer.sequence`](@ref). Concrete
 subtypes of `Pulse` represent different envelopes. All Pulses are callable
 and when given time as an argument, it will return the corresponding value
 for the pulse's envelope.
 """
-abstract Pulse
+abstract type Pulse end
 
 """
-```
-immutable Delay <: Pulse
-    duration::Float64
-end
-```
-
+    mutable struct Delay <: Pulse
+        duration::Float64
+    end
 Generate a delay for a pulse sequence.
 """
-immutable Delay <: Pulse
+mutable struct Delay <: Pulse
     duration::Float64
 end
 
 (x::Delay)(t) = 0.0
 
 """
-```
-type CosinePulse <: Pulse
-    amplitude::Float64
-    duration::Float64
-    phase::Float64
-end
-```
-
+    mutable struct CosinePulse <: Pulse
+        amplitude::Float64
+        duration::Float64
+        phase::Float64
+    end
 Generate cosine envelope with amplitude and duration. Keep track of a phase to
 allow phase shifting of the upconverted tone.
 """
-type CosinePulse <: Pulse
+mutable struct CosinePulse <: Pulse
     amplitude::Float64
     duration::Float64
     phase::Float64
@@ -63,18 +54,15 @@ end
 (x::CosinePulse)(t) = env_cos(t, x.amplitude, x.duration)
 
 """
-```
-type RectanglePulse <: Pulse
-    amplitude::Float64
-    duration::Float64
-    phase::Float64
-end
-```
-
+    mutable struct RectanglePulse <: Pulse
+        amplitude::Float64
+        duration::Float64
+        phase::Float64
+    end
 Generate rectangle envelope with amplitude and duration. Keep track of a phase to
 allow phase shifting of the upconverted tone.
 """
-type RectanglePulse <: Pulse
+mutable struct RectanglePulse <: Pulse
     amplitude::Float64
     duration::Float64
     phase::Float64
@@ -82,29 +70,21 @@ end
 (x::RectanglePulse)(t) = x.amplitude
 
 """
-```
-duration(x::Pulse)
-```
-
+    duration(x::Pulse)
 Query a pulse's duration.
 """
 @inline duration(x::Pulse) = x.duration
 
 """
-```
-phase(x::Pulse)
-```
-
+    phase(x::Pulse)
 Query a pulse's phase (delays return 0.0).
 """
 phase(x::Pulse) = x.phase
 phase(x::Delay) = 0.0
 
 """
-```
-sequence(sample_rate, IF, total_time, v::Vector{Pulse}; readout=false, marker_pts = 100)
-```
-
+    sequence(sample_rate, IF, total_time, v::Vector{Pulse};
+        readout=false, marker_pts = 100)
 Creates a `Tuple{Complex{Float64}, Bool}` representing the IQ data and marker data
 given a pulse sequence. Used internally, not called by user directly.
 """
@@ -154,10 +134,7 @@ function sequence(sample_rate, IF, total_time, v::Vector{Pulse}; readout=false, 
 end
 
 """
-```
-prepare(awg::InsAWG5014C)
-```
-
+    prepare(awg::InsAWG5014C)
 Prepare the AWG for use by SimpleSequencer. This generates waveforms with the
 necessary names, switches run mode to sequenced, and loops over the waveforms
 (with wait trigger enabled). It also turns on all outputs.
@@ -193,10 +170,7 @@ function prepare(awg::InsAWG5014C)
 end
 
 """
-```
-sendpulses(awg::InsAWG5014C, xys, xym, rs, rm)
-```
-
+    sendpulses(awg::InsAWG5014C, xys, xym, rs, rm)
 Given complex arrays `xys` and `rs` (xy sequence and readout sequence, respectively)
 and boolean arrays `xym` and `rm` (xy markers and readout markers, respectively), this
 updates the simple sequencer waveforms on the AWG and turns on the outputs. This
@@ -216,7 +190,7 @@ function sendpulses(awg::InsAWG5014C, xys, xym, rs, rm)
     nothing
 end
 
-type T1 <: Stimulus
+mutable struct T1 <: Stimulus
     awg::InsAWG5014C
     Xpi::Pulse
     readout::Pulse
@@ -228,11 +202,8 @@ type T1 <: Stimulus
 end
 
 """
-```
-T1(awg, Xpi, readout; IF=DEF_IF, axisname = :t1delay, axislabel = "Delay",
-    finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
-```
-
+    T1(awg, Xpi, readout; IF=DEF_IF, axisname = :t1delay, axislabel = "Delay",
+        finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a T1 stimulus object given an AWG, pi pulse, and readout pulse.
 Sourcing with a `Float64` will set the delay between the end of the pi pulse and
 the start of the readout pulse, sequencing a T1 measurement.
@@ -263,7 +234,7 @@ function source(x::T1, t)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
-type Rabi <: Stimulus
+mutable struct Rabi <: Stimulus
     awg::InsAWG5014C
     X::Pulse
     readout::Pulse
@@ -275,11 +246,8 @@ type Rabi <: Stimulus
 end
 
 """
-```
-Rabi(awg, X, readout; IF=DEF_IF, axisname=:xyduration, axislabel="XY pulse duration",
-    finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
-```
-
+    Rabi(awg, X, readout; IF=DEF_IF, axisname=:xyduration, axislabel="XY pulse duration",
+        finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a Rabi stimulus object given an AWG, XY pulse, and readout pulse.
 Sourcing with a `Float64` will set the duration of the XY pulse and sequence
 a Rabi flop measurement.
@@ -309,7 +277,7 @@ function source(x::Rabi, t)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
-type Ramsey <: Stimulus
+mutable struct Ramsey <: Stimulus
     awg::InsAWG5014C
     Xpi2::Pulse
     readout::Pulse
@@ -321,11 +289,8 @@ type Ramsey <: Stimulus
 end
 
 """
-```
-Ramsey(awg, X, readout; IF=DEF_IF, axisname=:xyduration, axislabel="XY pulse duration",
-    finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
-```
-
+    Ramsey(awg, X, readout; IF=DEF_IF, axisname=:xyduration, axislabel="XY pulse duration",
+        finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a Ramsey stimulus object given an AWG, pi/2 pulse, and readout pulse.
 Sourcing with a `Float64` will set the delay between pi/2 pulses and sequence
 a Ramsey (T2) measurement.
@@ -360,7 +325,7 @@ function source(x::Ramsey, t)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
-type CPMG <: Stimulus
+mutable struct CPMG <: Stimulus
     awg::InsAWG5014C
     Xpi2::Pulse
     Ypi::Pulse
@@ -376,13 +341,10 @@ type CPMG <: Stimulus
 end
 
 """
-```
-CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=1000,
-    axisname=:n_and_tp,
-    axislabel=:"(# of Y pulses, total free precession time)",
-    finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
-```
-
+    CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=1000,
+        axisname=:n_and_tp,
+        axislabel=:"(# of Y pulses, total free precession time)",
+        finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a CPMG (Carr-Purcell-Meiboom-Gill) stimulus object given an AWG, X pi/2
 pulse, Y pi pulse, -Y pi pulse, and readout pulse. Sourcing with a tuple `(n,t_p)`
 will set the number of pi pulses `n` and the total idle time between the first
@@ -436,17 +398,14 @@ function source(x::CPMG, v)
 end
 
 # For convenience
-type CPMG_n <: Stimulus
+mutable struct CPMG_n <: Stimulus
     cpmg::CPMG
     axisname::Symbol
     axislabel::String
 end
 
 """
-```
-CPMG_n(s::CPMG; axisname=:n_Ypulses, axislabel="# of Y pulses")
-```
-
+    CPMG_n(s::CPMG; axisname=:n_Ypulses, axislabel="# of Y pulses")
 Creates a `CPMG_n` stimulus object using a [`CPMG`](@ref) object. When sourced,
 this will change the number of pi pulses and then source the underlying `CPMG`
 object. In this way, the number of pi pulses and the idle time can be swept
@@ -456,17 +415,14 @@ CPMG_n(s::CPMG; axisname=:n_Ypulses, axislabel="# of Y pulses") =
     CPMG_n(s, axisname, axislabel)
 source(s::CPMG_n, nY) = source(s.cpmg, (nY, s.cpmg.t_precess))
 
-type CPMG_t <: Stimulus
+mutable struct CPMG_t <: Stimulus
     cpmg::CPMG
     axisname::Symbol
     axislabel::String
 end
 
 """
-```
-CPMG_t(s::CPMG; axisname=:precessiontime, axislabel="Total free precession time")
-```
-
+    CPMG_t(s::CPMG; axisname=:precessiontime, axislabel="Total free precession time")
 Creates a `CPMG_n` stimulus object using a [`CPMG`](@ref) object. When sourced,
 this will change the number of pi pulses and then source the underlying `CPMG`
 object. In this way, the number of pi pulses and the idle time can be swept
@@ -476,7 +432,7 @@ CPMG_t(s::CPMG; axisname=:precessiontime, axislabel="Total free precession time"
     CPMG_t(s, axisname, axislabel)
 source(s::CPMG_t, t) = source(s.cpmg, (s.cpmg.nY, t))
 
-type StarkShift <: Stimulus
+mutable struct StarkShift <: Stimulus
     awg::InsAWG5014C
     Xpi::Pulse
     readout::Pulse
@@ -488,11 +444,8 @@ type StarkShift <: Stimulus
 end
 
 """
-```
-StarkShift(awg, Xpi, readout; IF=DEF_IF, axisname=:t_offset, axislabel=:"Offset time",
-    finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
-```
-
+    StarkShift(awg, Xpi, readout; IF=DEF_IF, axisname=:t_offset, axislabel=:"Offset time",
+        finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a `StarkShift` stimulus object given an AWG, pi pulse, and readout pulse.
 Sourcing with a time will set the starting time of the pi pulse with respect
 to the starting time of the first readout tone. `source` will throw an `AssertionError`
@@ -525,7 +478,7 @@ function source(x::StarkShift, t)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
-type LongStarkShift <: Stimulus
+mutable struct LongStarkShift <: Stimulus
     awg::InsAWG5014C
     Xpi::Pulse
     readout1::Pulse
@@ -538,11 +491,8 @@ type LongStarkShift <: Stimulus
 end
 
 """
-```
-LongStarkShift(awg, Xpi, readout1, readout2; IF=DEF_IF, axisname=:t_offset,
-    axislabel=:"Offset time", finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
-```
-
+    LongStarkShift(awg, Xpi, readout1, readout2; IF=DEF_IF, axisname=:t_offset,
+        axislabel=:"Offset time", finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a `LongStarkShift` stimulus object given an AWG, pi pulse, and two
 distinct readout pulses. Sourcing with a time will set the starting time of the
 pi pulse with respect to the starting time of the first readout tone.
