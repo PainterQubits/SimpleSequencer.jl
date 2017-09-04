@@ -341,7 +341,7 @@ mutable struct CPMG <: Stimulus
 end
 
 """
-    CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=1000,
+    CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=0,
         axisname=:n_and_tp,
         axislabel=:"(# of Y pulses, total free precession time)",
         finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
@@ -351,7 +351,7 @@ will set the number of pi pulses `n` and the total idle time between the first
 and last pi/2 pulse. This is hard to use in a sweep directly, instead suggest
 sourcing a [`CPMG_n`](@ref) or [`CPMG_t`](@ref) object.
 """
-CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=1000,
+CPMG(awg, Xpi2, Ypi, mYpi, readout; IF=DEF_IF, nY=1, t_precess=0,
     axisname=:n_and_tp,
     axislabel=:"(# of Y pulses, total free precession time)",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
@@ -368,7 +368,7 @@ function source(x::CPMG, v)
     s = [x.Xpi2,
      Delay(t),
      x.Ypi,
-     take(cycle([Delay(2*t), x.Ypi, Delay(2*t), x.Ypi]), 2*(nY-1))...,
+     Iterators.take(Iterators.cycle([Delay(2*t), x.Ypi, Delay(2*t), x.Ypi]), 2*(nY-1))...,
      Delay(t),
      x.Xpi2,
      Delay(duration(x.readout)),
@@ -383,7 +383,7 @@ function source(x::CPMG, v)
         [Delay(duration(x.Xpi2)),
          Delay(t),
          Delay(duration(x.Ypi)),
-         take(cycle([Delay(2*t),
+         Iterators.take(Iterators.cycle([Delay(2*t),
                      Delay(duration(x.Ypi)),
                      Delay(2*t),
                      Delay(duration(x.Ypi))]), 2*(nY-1))...,
