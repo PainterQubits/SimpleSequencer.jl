@@ -42,6 +42,7 @@ end
         amplitude::Float64
         duration::Float64
         phase::Float64
+        IF::Float64
     end
 Generate cosine envelope with amplitude and duration. Keep track of a phase to
 allow phase shifting of the upconverted tone.
@@ -50,6 +51,7 @@ mutable struct CosinePulse <: Pulse
     amplitude::Float64
     duration::Float64
     phase::Float64
+    IF::Float64
 end
 (x::CosinePulse)(t) = env_cos(t, x.amplitude, x.duration)
 
@@ -58,6 +60,7 @@ end
         amplitude::Float64
         duration::Float64
         phase::Float64
+        IF::Float64
     end
 Generate rectangle envelope with amplitude and duration. Keep track of a phase to
 allow phase shifting of the upconverted tone.
@@ -66,6 +69,7 @@ mutable struct RectanglePulse <: Pulse
     amplitude::Float64
     duration::Float64
     phase::Float64
+    IF::Float64
 end
 (x::RectanglePulse)(t) = x.amplitude
 
@@ -83,12 +87,18 @@ phase(x::Pulse) = x.phase
 phase(x::Delay) = 0.0
 
 """
-    sequence(sample_rate, IF, total_time, v::Vector{Pulse};
+    IF(x::Pulse)
+Query a pulse's IF.
+"""
+IF(x::Pulse) = x.IF
+
+"""
+    sequence(sample_rate, total_time, v::Vector{Pulse};
         readout=false, marker_pts = 100)
 Creates a `Tuple{Complex{Float64}, Bool}` representing the IQ data and marker data
 given a pulse sequence. Used internally, not called by user directly.
 """
-function sequence(sample_rate, IF, total_time, v::Vector{Pulse}; readout=false, marker_pts = 100)
+function sequence(sample_rate, total_time, v::Vector{Pulse}; readout=false, marker_pts = 100)
     step = 1/sample_rate
 
     # `rng` is the sole time-base used for sequence generation.
@@ -120,7 +130,7 @@ function sequence(sample_rate, IF, total_time, v::Vector{Pulse}; readout=false, 
 
         if !isa(p, Delay)
             for i in 1:length(prng)
-                seq[idx+i] = p(prng[i]-dur)*if_signal(ifrng[i], IF, phase(p))
+                seq[idx+i] = p(prng[i]-dur)*if_signal(ifrng[i], IF(p), phase(p))
             end
             for i in 1:marker_pts
                 markers[idx+i] = true
@@ -194,8 +204,6 @@ mutable struct T1 <: Stimulus
     awg::InsAWG5014C
     Xpi::Pulse
     readout::Pulse
-    xyIF::Float64
-    readIF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
     axisname::Symbol
@@ -203,20 +211,20 @@ mutable struct T1 <: Stimulus
 end
 
 """
-    T1(awg, Xpi, readout; xyIF=DEF_IF, readIF=DEF_IF, axisname = :t1delay,
+    T1(awg, Xpi, readout; axisname = :t1delay,
         axislabel = "Delay", finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a T1 stimulus object given an AWG, pi pulse, and readout pulse.
 Sourcing with a `Float64` will set the delay between the end of the pi pulse and
 the start of the readout pulse, sequencing a T1 measurement.
 """
-T1(awg, Xpi, readout; xyIF=DEF_IF, readIF=DEF_IF, axisname = :t1delay, axislabel = "Delay",
+T1(awg, Xpi, readout; axisname = :t1delay, axislabel = "Delay",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    T1(awg, Xpi, readout, xyIF, readIF, finaldelay1, finaldelay2, axisname, axislabel)
+    T1(awg, Xpi, readout, finaldelay1, finaldelay2, axisname, axislabel)
 function source(x::T1, t)
     awg = x.awg
     rate = awg[SampleRate]
     total_time = duration(x.Xpi)+t+2*duration(x.readout)+x.finaldelay1+x.finaldelay2
-    xys, xym = sequence(rate, x.xyIF, total_time,
+    xys, xym = sequence(rate, total_time,
         [x.Xpi,
          Delay(t),
          Delay(duration(x.readout)),
@@ -224,7 +232,7 @@ function source(x::T1, t)
          Delay(duration(x.readout)),
          Delay(x.finaldelay2)],
         marker_pts = 0)
-    rs, rm = sequence(rate, x.readIF, total_time,
+    rs, rm = sequence(rate, total_time,
         [Delay(duration(x.Xpi)),
          Delay(t),
          x.readout,
@@ -239,8 +247,6 @@ mutable struct Rabi <: Stimulus
     awg::InsAWG5014C
     X::Pulse
     readout::Pulse
-    xyIF::Float64
-    readIF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
     axisname::Symbol
@@ -248,29 +254,28 @@ mutable struct Rabi <: Stimulus
 end
 
 """
-    Rabi(awg, X, readout; xyIF=DEF_IF, readIF=DEF_IF, axisname=:xyduration,
-        axislabel="XY pulse duration", finaldelay1=DEF_READ_DLY,
-        finaldelay2=DEF_READ_DLY)
+    Rabi(awg, X, readout; axisname=:xyduration, axislabel="XY pulse duration",
+        finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a Rabi stimulus object given an AWG, XY pulse, and readout pulse.
 Sourcing with a `Float64` will set the duration of the XY pulse and sequence
 a Rabi flop measurement.
 """
-Rabi(awg, X, readout; xyIF=DEF_IF, readIF=DEF_IF, axisname=:xyduration, axislabel="XY pulse duration",
+Rabi(awg, X, readout; axisname=:xyduration, axislabel="XY pulse duration",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    Rabi(awg, X, readout, xyIF, readIF, finaldelay1, finaldelay2, axisname, axislabel)
+    Rabi(awg, X, readout, finaldelay1, finaldelay2, axisname, axislabel)
 function source(x::Rabi, t)
     awg = x.awg
     rate = awg[SampleRate]
     x.X.duration = t
     total_time = t + 2*duration(x.readout) + x.finaldelay1 + x.finaldelay2
-    xys, xym = sequence(rate, x.xyIF, total_time,
+    xys, xym = sequence(rate, total_time,
         [x.X,
          Delay(duration(x.readout)),
          Delay(x.finaldelay1),
          Delay(duration(x.readout)),
          Delay(x.finaldelay2)],
         marker_pts = 0)
-    rs, rm = sequence(rate, x.readIF, total_time,
+    rs, rm = sequence(rate, total_time,
         [Delay(duration(x.X)),
          x.readout,
          Delay(x.finaldelay1),
@@ -284,8 +289,6 @@ mutable struct Ramsey <: Stimulus
     awg::InsAWG5014C
     Xpi2::Pulse
     readout::Pulse
-    xyIF::Float64
-    readIF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
     axisname::Symbol
@@ -293,23 +296,22 @@ mutable struct Ramsey <: Stimulus
 end
 
 """
-    Ramsey(awg, X, readout; xyIF=DEF_IF, readIF=DEF_IF, axisname=:xyduration,
-        axislabel="XY pulse duration", finaldelay1=DEF_READ_DLY,
-        finaldelay2=DEF_READ_DLY)
+    Ramsey(awg, X, readout; axisname=:xyduration, axislabel="XY pulse duration",
+        finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a Ramsey stimulus object given an AWG, pi/2 pulse, and readout pulse.
 Sourcing with a `Float64` will set the delay between pi/2 pulses and sequence
 a Ramsey (T2) measurement.
 """
-Ramsey(awg, Xpi2, readout; xyIF=DEF_IF, readIF=DEF_IF, axisname=:ramseydelay,
+Ramsey(awg, Xpi2, readout; axisname=:ramseydelay,
     axislabel="Free precession time",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    Ramsey(awg, Xpi2, readout, xyIF, readIF, finaldelay1, finaldelay2, axisname, axislabel)
+    Ramsey(awg, Xpi2, readout, finaldelay1, finaldelay2, axisname, axislabel)
 function source(x::Ramsey, t)
     awg = x.awg
     rate = awg[SampleRate]
 
     total_time = 2*duration(x.Xpi2)+t+2*duration(x.readout)+x.finaldelay1+x.finaldelay2
-    xys, xym = sequence(rate, x.xyIF, total_time,
+    xys, xym = sequence(rate, total_time,
         [x.Xpi2,
          Delay(t),
          x.Xpi2,
@@ -318,7 +320,7 @@ function source(x::Ramsey, t)
          Delay(duration(x.readout)),
          Delay(x.finaldelay2)],
         marker_pts = 0)
-    rs, rm = sequence(rate, x.readIF, total_time,
+    rs, rm = sequence(rate, total_time,
         [Delay(duration(x.Xpi2)),
          Delay(t),
          Delay(duration(x.Xpi2)),
@@ -336,8 +338,6 @@ mutable struct CPMG <: Stimulus
     Ypi::Pulse
     mYpi::Pulse
     readout::Pulse
-    xyIF::Float64
-    readIF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
     nY::Int
@@ -347,8 +347,7 @@ mutable struct CPMG <: Stimulus
 end
 
 """
-    CPMG(awg, Xpi2, Ypi, mYpi, readout; xyIF=DEF_IF, readIF=DEF_IF, nY=1,
-        t_precess=0, axisname=:n_and_tp,
+    CPMG(awg, Xpi2, Ypi, mYpi, readout; nY=1, t_precess=0, axisname=:n_and_tp,
         axislabel=:"(# of Y pulses, total free precession time)",
         finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a CPMG (Carr-Purcell-Meiboom-Gill) stimulus object given an AWG, X pi/2
@@ -357,11 +356,10 @@ will set the number of pi pulses `n` and the total idle time between the first
 and last pi/2 pulse. This is hard to use in a sweep directly, instead suggest
 sourcing a [`CPMG_n`](@ref) or [`CPMG_t`](@ref) object.
 """
-CPMG(awg, Xpi2, Ypi, mYpi, readout; xyIF=DEF_IF, readIF=DEF_IF, nY=1,
-    t_precess=0, axisname=:n_and_tp,
+CPMG(awg, Xpi2, Ypi, mYpi, readout; nY=1, t_precess=0, axisname=:n_and_tp,
     axislabel=:"(# of Y pulses, total free precession time)",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    CPMG(awg, Xpi2, Ypi, mYpi, readout, xyIF, readIF, finaldelay1, finaldelay2,
+    CPMG(awg, Xpi2, Ypi, mYpi, readout, finaldelay1, finaldelay2,
         nY, t_precess, axisname, axislabel)
 function source(x::CPMG, v)
     nY, t_precess = v
@@ -384,8 +382,8 @@ function source(x::CPMG, v)
 
     total_time = mapreduce(duration, +, 0.0, s)
 
-    xys, xym = sequence(rate, x.xyIF, total_time, s, marker_pts = 0)
-    rs, rm = sequence(rate, x.readIF, total_time,
+    xys, xym = sequence(rate, total_time, s, marker_pts = 0)
+    rs, rm = sequence(rate, total_time,
         [Delay(duration(x.Xpi2)),
          Delay(t),
          Delay(duration(x.Ypi)),
@@ -442,8 +440,6 @@ mutable struct StarkShift <: Stimulus
     awg::InsAWG5014C
     Xpi::Pulse
     readout::Pulse
-    xyIF::Float64
-    readIF:::Float64
     finaldelay1::Float64
     finaldelay2::Float64
     axisname::Symbol
@@ -451,19 +447,16 @@ mutable struct StarkShift <: Stimulus
 end
 
 """
-    StarkShift(awg, Xpi, readout; xyIF=DEF_IF, readIF=DEF_IF,
-        axisname=:t_offset, axislabel=:"Offset time",
+    StarkShift(awg, Xpi, readout; axisname=:t_offset, axislabel=:"Offset time",
         finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a `StarkShift` stimulus object given an AWG, pi pulse, and readout pulse.
 Sourcing with a time will set the starting time of the pi pulse with respect
 to the starting time of the first readout tone. `source` will throw an `AssertionError`
 if you source a time less than minus the pi pulse duration.
 """
-StarkShift(awg, Xpi, readout; xyIF=DEF_IF, readIF=DEF_IF,
-    axisname=:t_offset,
-    axislabel=:"Offset time",
+StarkShift(awg, Xpi, readout; axisname=:t_offset, axislabel=:"Offset time",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    StarkShift(awg, Xpi, readout, xyIF, readIF, finaldelay1, finaldelay2,
+    StarkShift(awg, Xpi, readout, finaldelay1, finaldelay2,
         axisname, axislabel)
 function source(x::StarkShift, t)
     awg = x.awg
@@ -477,13 +470,13 @@ function source(x::StarkShift, t)
      Delay(x.finaldelay2)]
     total_time = mapreduce(duration, +, 0.0, s)
 
-    xys, xym = sequence(rate, x.xyIF, total_time,
+    xys, xym = sequence(rate, total_time,
         [Delay(t+duration(x.Xpi)),
          x.Xpi,
          Delay((duration(x.Xpi)+2*duration(x.readout)+x.finaldelay1+x.finaldelay2) -
             (t+2*duration(x.Xpi)))],
         marker_pts = 0)
-    rs, rm = sequence(rate, x.readIF, total_time, s, readout = true)
+    rs, rm = sequence(rate, total_time, s, readout = true)
     sendpulses(awg, xys, xym, rs, rm)
 end
 
@@ -492,8 +485,6 @@ mutable struct LongStarkShift <: Stimulus
     Xpi::Pulse
     readout1::Pulse
     readout2::Pulse
-    xyIF::Float64
-    readIF::Float64
     finaldelay1::Float64
     finaldelay2::Float64
     axisname::Symbol
@@ -501,7 +492,7 @@ mutable struct LongStarkShift <: Stimulus
 end
 
 """
-    LongStarkShift(awg, Xpi, readout1, readout2; IF=DEF_IF, axisname=:t_offset,
+    LongStarkShift(awg, Xpi, readout1, readout2; axisname=:t_offset,
         axislabel=:"Offset time", finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a `LongStarkShift` stimulus object given an AWG, pi pulse, and two
 distinct readout pulses. Sourcing with a time will set the starting time of the
@@ -516,11 +507,11 @@ if you drive the resonator a long time.
 Do take care that the resonator has rung down before doing the second readout pulse
 (the readout pulses are not kept phase coherent).
 """
-LongStarkShift(awg, Xpi, readout1, readout2; xyIF=DEF_IF, readIF=DEF_IF,
+LongStarkShift(awg, Xpi, readout1, readout2;
     axisname=:t_offset,
     axislabel=:"Offset time",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
-    LongStarkShift(awg, Xpi, readout1, readout2, xyIF, readIF,
+    LongStarkShift(awg, Xpi, readout1, readout2,
         finaldelay1, finaldelay2, axisname, axislabel)
 function source(x::LongStarkShift, t)
     awg = x.awg
@@ -534,16 +525,63 @@ function source(x::LongStarkShift, t)
      Delay(x.finaldelay2)]
     total_time = mapreduce(duration, +, 0.0, s)
 
-    xys, xym = sequence(rate, x.xyIF, total_time,
+    xys, xym = sequence(rate, total_time,
         [Delay(t+duration(x.Xpi)),
          x.Xpi,
          Delay((duration(x.Xpi)+duration(x.readout1)+duration(x.readout2)+
             x.finaldelay1+x.finaldelay2) -(t+2*duration(x.Xpi)))],
         marker_pts = 0)
-    rs, rm = sequence(rate, x.readIF, total_time, s, readout = true)
+    rs, rm = sequence(rate, total_time, s, readout = true)
     sendpulses(awg, xys, xym, rs, rm)
 end
-#
+
+mutable struct AnharmonicitySearch <: Stimulus
+    awg::InsAWG5014C
+    X01::Pulse
+    X12::Pulse
+    readout::Pulse
+    finaldelay1::Float64
+    finaldelay2::Float64
+    axisname::Symbol
+    axislabel::String
+end
+
+"""
+    AnharmonicitySearch(awg, X01, X12, readout; axisname = :X12IF,
+        axislabel = "X12 IF (Hz)", finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
+Creates an AnharmonicitySearch stimulus object given an AWG, pulse for 0-1
+transition, pulse for 1-2 transition, and readout pulse. This will do a 0-1 pulse,
+immediately followed by a 1-2 pulse, immediately followed by readout.
+Sourcing with a `Float64` will set the IF for the 1-2 transition pulse.
+"""
+AnharmonicitySearch(awg, X01, X12, readout; axisname = :X12IF,
+    axislabel = "X12 IF (Hz)", finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
+    AnharmonicitySearch(awg, X01, X12, readout,
+        finaldelay1, finaldelay2, axisname, axislabel)
+function source(x::AnharmonicitySearch, IF)
+    awg = x.awg
+    rate = awg[SampleRate]
+    x.X12.IF = IF
+    total_time = duration(x.X01) + duration(x.X12) +
+        2*duration(x.readout) + x.finaldelay1 + x.finaldelay2
+    xys, xym = sequence(rate, total_time,
+        [x.X01,
+         x.X12,
+         Delay(duration(x.readout)),
+         Delay(x.finaldelay1),
+         Delay(duration(x.readout)),
+         Delay(x.finaldelay2)],
+        marker_pts = 0)
+    rs, rm = sequence(rate, total_time,
+        [Delay(duration(x.X01)),
+         Delay(duration(x.X12)),
+         x.readout,
+         Delay(x.finaldelay1),
+         x.readout,
+         Delay(x.finaldelay2)],
+         readout = true)
+    sendpulses(awg, xys, xym, rs, rm)
+end
 # type PulseVariation <: Stimulus
 #     p::Pulse
 #     f::Symbol
