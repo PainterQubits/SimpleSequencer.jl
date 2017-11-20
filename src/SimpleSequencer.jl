@@ -172,7 +172,15 @@ function prepare(awg::InsAWG5014C)
     awg[SequenceWaitTrigger,1] = true
     opc(awg)
 
-    @allch awg[ChannelOutput] = true
+    awg[ChannelOutput,1] = true
+    opc(awg)
+    awg[ChannelOutput,2] = true
+    opc(awg)
+    awg[ChannelOutput,3] = true
+    opc(awg)
+    awg[ChannelOutput,4] = true
+    opc(awg)
+
     awg[Output] = true
     opc(awg)
 
@@ -193,7 +201,15 @@ function sendpulses(awg::InsAWG5014C, xys, xym, rs, rm)
     pushto_awg(awg, "simple_seq_RQ", AWG5014CData(imag(rs), rm, rm), :RealWaveform)
     opc(awg)
 
-    @allch awg[ChannelOutput] = true
+    awg[ChannelOutput,1] = true
+    opc(awg)
+    awg[ChannelOutput,2] = true
+    opc(awg)
+    awg[ChannelOutput,3] = true
+    opc(awg)
+    awg[ChannelOutput,4] = true
+    opc(awg)
+
     awg[Output] = true
     opc(awg)
 
@@ -342,12 +358,15 @@ mutable struct CPMG <: Stimulus
     finaldelay2::Float64
     nY::Int
     t_precess::Float64
+    δt1::Float64
+    δt2::Float64
     axisname::Symbol
     axislabel::String
 end
 
 """
-    CPMG(awg, Xpi2, Ypi, mYpi, readout; nY=1, t_precess=0, axisname=:n_and_tp,
+    CPMG(awg, Xpi2, Ypi, mYpi, readout; nY=1, t_precess=duration(Ypi),
+        δt1 = 0, δt2 = 0, axisname=:n_and_tp,
         axislabel=:"(# of Y pulses, total free precession time)",
         finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY)
 Creates a CPMG (Carr-Purcell-Meiboom-Gill) stimulus object given an AWG, X pi/2
@@ -356,24 +375,33 @@ will set the number of pi pulses `n` and the total idle time between the first
 and last pi/2 pulse. This is hard to use in a sweep directly, instead suggest
 sourcing a [`CPMG_n`](@ref) or [`CPMG_t`](@ref) object.
 """
-CPMG(awg, Xpi2, Ypi, mYpi, readout; nY=1, t_precess=0, axisname=:n_and_tp,
+CPMG(awg, Xpi2, Ypi, mYpi, readout; nY=1, t_precess=duration(Ypi),
+    δt1 = 0, δt2 = 0, axisname=:n_and_tp,
     axislabel=:"(# of Y pulses, total free precession time)",
     finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
     CPMG(awg, Xpi2, Ypi, mYpi, readout, finaldelay1, finaldelay2,
-        nY, t_precess, axisname, axislabel)
+        nY, t_precess, δt1, δt2, axisname, axislabel)
 function source(x::CPMG, v)
-    nY, t_precess = v
+    nY, t_precess, δt1, δt2 = v
+    @assert (t_precess - nY*duration(x.Ypi) >= 0)
+    @assert duration(x.Ypi) == duration(x.mYpi)
+
     x.nY = nY
     x.t_precess = t_precess
+    x.δt1 = δt1
+    x.δt2 = δt2
+
     awg = x.awg
     rate = awg[SampleRate]
-    t = t_precess / (2*nY)
+    t = (t_precess - nY*duration(x.Ypi)) / (2*nY)
+    @assert t-δt1 >= 0
+    @assert 2*t-δt2 >= 0
 
     s = [x.Xpi2,
-     Delay(t),
+     Delay(t-δt1),
      x.Ypi,
-     Iterators.take(Iterators.cycle([Delay(2*t), x.Ypi, Delay(2*t), x.Ypi]), 2*(nY-1))...,
-     Delay(t),
+     Iterators.take(Iterators.cycle([Delay(2*t-δt2), x.mYpi, Delay(2*t+δt2), x.Ypi]), 2*(nY-1))...,
+     Delay(t+δt1),
      x.Xpi2,
      Delay(duration(x.readout)),
      Delay(x.finaldelay1),
@@ -385,13 +413,13 @@ function source(x::CPMG, v)
     xys, xym = sequence(rate, total_time, s, marker_pts = 0)
     rs, rm = sequence(rate, total_time,
         [Delay(duration(x.Xpi2)),
-         Delay(t),
+         Delay(t-δt1),
          Delay(duration(x.Ypi)),
-         Iterators.take(Iterators.cycle([Delay(2*t),
-                     Delay(duration(x.Ypi)),
-                     Delay(2*t),
+         Iterators.take(Iterators.cycle([Delay(2*t-δt2),
+                     Delay(duration(x.mYpi)),
+                     Delay(2*t+δt2),
                      Delay(duration(x.Ypi))]), 2*(nY-1))...,
-         Delay(t),
+         Delay(t+δt1),
          Delay(duration(x.Xpi2)),
          x.readout,
          Delay(x.finaldelay1),
@@ -411,13 +439,11 @@ end
 """
     CPMG_n(s::CPMG; axisname=:n_Ypulses, axislabel="# of Y pulses")
 Creates a `CPMG_n` stimulus object using a [`CPMG`](@ref) object. When sourced,
-this will change the number of pi pulses and then source the underlying `CPMG`
-object. In this way, the number of pi pulses and the idle time can be swept
-on separate axes.
+this will change the number of pi pulses.
 """
 CPMG_n(s::CPMG; axisname=:n_Ypulses, axislabel="# of Y pulses") =
     CPMG_n(s, axisname, axislabel)
-source(s::CPMG_n, nY) = source(s.cpmg, (nY, s.cpmg.t_precess))
+source(s::CPMG_n, nY) = source(s.cpmg, (nY, s.cpmg.t_precess, s.cpmg.δt1, s.cpmg.δt2))
 
 mutable struct CPMG_t <: Stimulus
     cpmg::CPMG
@@ -427,14 +453,42 @@ end
 
 """
     CPMG_t(s::CPMG; axisname=:precessiontime, axislabel="Total free precession time")
-Creates a `CPMG_n` stimulus object using a [`CPMG`](@ref) object. When sourced,
-this will change the number of pi pulses and then source the underlying `CPMG`
-object. In this way, the number of pi pulses and the idle time can be swept
-on separate axes.
+Creates a `CPMG_t` stimulus object using a [`CPMG`](@ref) object. When sourced,
+this will change the free precession time.
 """
 CPMG_t(s::CPMG; axisname=:precessiontime, axislabel="Total free precession time") =
     CPMG_t(s, axisname, axislabel)
-source(s::CPMG_t, t) = source(s.cpmg, (s.cpmg.nY, t))
+source(s::CPMG_t, t) = source(s.cpmg, (s.cpmg.nY, t, s.cpmg.δt1, s.cpmg.δt2))
+
+mutable struct CPMG_δt1 <: Stimulus
+    cpmg::CPMG
+    axisname::Symbol
+    axislabel::String
+end
+
+"""
+    CPMG_δt1(s::CPMG; axisname=:δt1, axislabel="Time offset 1")
+Creates a `CPMG_δt1` stimulus object using a [`CPMG`](@ref) object. When sourced,
+this will change the first time offset.
+"""
+CPMG_δt1(s::CPMG; axisname=:δt1, axislabel="Time offset 1") =
+    CPMG_δt1(s, axisname, axislabel)
+source(s::CPMG_δt1, t) = source(s.cpmg, (s.cpmg.nY, s.cpmg.t_precess, t, s.cpmg.δt2))
+
+mutable struct CPMG_δt2 <: Stimulus
+    cpmg::CPMG
+    axisname::Symbol
+    axislabel::String
+end
+
+"""
+    CPMG_δt2(s::CPMG; axisname=:δt2, axislabel="Time offset 2")
+Creates a `CPMG_δt2` stimulus object using a [`CPMG`](@ref) object. When sourced,
+this will change the second time offset.
+"""
+CPMG_δt2(s::CPMG; axisname=:δt2, axislabel="Time offset 2") =
+    CPMG_δt2(s, axisname, axislabel)
+source(s::CPMG_δt2, t) = source(s.cpmg, (s.cpmg.nY, s.cpmg.t_precess, s.cpmg.δt1, t))
 
 mutable struct StarkShift <: Stimulus
     awg::InsAWG5014C
@@ -575,6 +629,47 @@ function source(x::AnharmonicitySearch, IF)
     rs, rm = sequence(rate, total_time,
         [Delay(duration(x.X01)),
          Delay(duration(x.X12)),
+         x.readout,
+         Delay(x.finaldelay1),
+         x.readout,
+         Delay(x.finaldelay2)],
+         readout = true)
+    sendpulses(awg, xys, xym, rs, rm)
+end
+
+mutable struct T1_12 <: Stimulus
+    awg::InsAWG5014C
+    X01::Pulse
+    X12::Pulse
+    readout::Pulse
+    finaldelay1::Float64
+    finaldelay2::Float64
+    axisname::Symbol
+    axislabel::String
+end
+T1_12(awg, X01, X12, readout; axisname = :t1delay,
+    axislabel = "Delay", finaldelay1=DEF_READ_DLY, finaldelay2=DEF_READ_DLY) =
+    T1_12(awg, X01, X12, readout,
+        finaldelay1, finaldelay2, axisname, axislabel)
+
+function source(x::T1_12, t::Float64)
+    awg = x.awg
+    rate = awg[SampleRate]
+    total_time = duration(x.X01) + duration(x.X12) + t +
+        2*duration(x.readout) + x.finaldelay1 + x.finaldelay2
+    xys, xym = sequence(rate, total_time,
+        [x.X01,
+         x.X12,
+         Delay(t),
+         Delay(duration(x.readout)),
+         Delay(x.finaldelay1),
+         Delay(duration(x.readout)),
+         Delay(x.finaldelay2)],
+        marker_pts = 0)
+    rs, rm = sequence(rate, total_time,
+        [Delay(duration(x.X01)),
+         Delay(duration(x.X12)),
+         Delay(t),
          x.readout,
          Delay(x.finaldelay1),
          x.readout,
